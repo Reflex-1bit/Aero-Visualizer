@@ -7,6 +7,12 @@ source-panel solve for the rear wing, with voxel-based body deflection for the r
 
 **Live demo:** https://aero-visual.vercel.app
 
+## Screenshots
+
+| 3/4 view — streamlines over the body | Rear view — underbody & wake flow |
+| --- | --- |
+| ![3/4 flow view](screenshots/flow-3q.png) | ![rear flow view](screenshots/flow-rear.png) |
+
 ## Features
 
 - Real-time streamlines that hug the bodywork and glide along the ground.
@@ -35,7 +41,8 @@ python -m http.server 8765
 | Path | Description |
 | --- | --- |
 | `index.html` | The entire app (Three.js scene, physics, UI). |
-| `rb19.glb` | The 3D car model loaded at runtime. |
+| `rb19.glb` | The 3D car model loaded at runtime (Draco-compressed, ~2.5 MB). |
+| `screenshots/` | Preview images used in this README. |
 | `rb19.zip` | Original packaged model source. |
 | `_model_extract.json` | Extracted model metadata. |
 | `model.txt` | Primitive F1 starter/reference geometry notes. |
@@ -45,7 +52,7 @@ python -m http.server 8765
 
 ## Tech
 
-- [Three.js](https://threejs.org/) r128 + GLTFLoader (via CDN)
+- [Three.js](https://threejs.org/) r128 + GLTFLoader / DRACOLoader (via CDN)
 - Vanilla JS, no build step
 - Deployed as a static site on Vercel
 
