@@ -26,6 +26,38 @@ source-panel solve for the rear wing, with voxel-based body deflection for the r
 - Mobile-friendly: responsive HUD, one-finger orbit, two-finger pinch zoom, and reduced
   GPU load on phones.
 
+## Machine learning · airfoil Cl/Cd model
+
+The rear-wing aerodynamics are informed by a small ML model that predicts lift (`Cl`) and
+drag (`Cd`) coefficients directly from airfoil shape. The full training notebook lives in
+[`ml/airfoil_ml_project.ipynb`](ml/airfoil_ml_project.ipynb).
+
+**Data.** A public OpenFOAM CFD dataset of 2,946 airfoils at Reynolds number 1e5. Each
+airfoil is described by 8 [CST shape coefficients](https://en.wikipedia.org/wiki/Class_shape_transformation)
+and sampled across ~11–13 angles of attack, giving `Cl` and `Cd` per (shape, AoA).
+
+**Features → targets.** Inputs are `AoA` + the 8 CST coefficients (9 features); outputs are
+`[Cl, Cd]`.
+
+**Leakage-safe split.** Because each airfoil appears in many rows (one per AoA), a naive
+row-level split would leak the same shape into both train and validation. The notebook uses
+`GroupShuffleSplit` keyed on the airfoil filename so every shape lands entirely in train
+*or* validation — never both — giving an honest estimate of generalization to unseen shapes.
+
+**Models.**
+- *Baseline:* multi-output linear regression on standardized features.
+- *Neural net (`AeroNet`, PyTorch):* a 9 → 64 → 64 → 2 MLP with ReLU activations, trained
+  with Adam (lr 1e-3, MSE, 300 epochs, batch 256). Both inputs **and** targets are
+  standardized so the loss isn't dominated by `Cl`'s larger scale (`Cl` ~ -1..2 vs
+  `Cd` ~ 0.001..0.09); predictions are inverse-transformed back to physical units.
+
+**Evaluation.** Beyond a single R², the notebook breaks error down by angle of attack,
+surfaces the worst individual predictions, and plots predicted-vs-true parity for both
+coefficients — error rising near stall (high AoA) is expected as the flow becomes nonlinear.
+
+Run the notebook top-to-bottom with `airfoil_data.csv` alongside it; later cells depend on
+variables (`df`, `model`, …) defined earlier.
+
 ## Running locally
 
 The app loads `rb19.glb` via `fetch`, so it must be served over HTTP (not opened as a
@@ -42,13 +74,11 @@ python -m http.server 8765
 | --- | --- |
 | `index.html` | The entire app (Three.js scene, physics, UI). |
 | `rb19.glb` | The 3D car model loaded at runtime (Draco-compressed, ~2.5 MB). |
+| `ml/` | Airfoil Cl/Cd machine-learning notebook. |
+| `scripts/` | Model export / aero-assembly pipeline and iterative build patches (`export_rb19.py`, `assemble_aero.py`, `fix_*.py`, `patch_*.py`). |
+| `data/` | Model source & metadata (`rb19.zip`, `_model_extract.json`, `model.txt`). |
+| `dev/` | Dev / debugging harnesses (`probe.html`, `smoke_flow.html`, `debug_flow.js`, `check_dom.py`). |
 | `screenshots/` | Preview images used in this README. |
-| `rb19.zip` | Original packaged model source. |
-| `_model_extract.json` | Extracted model metadata. |
-| `model.txt` | Primitive F1 starter/reference geometry notes. |
-| `export_rb19.py`, `assemble_aero.py` | Model export / aero assembly pipeline. |
-| `fix_*.py`, `patch_*.py` | Iterative patches used while building the visualizer. |
-| `probe.html`, `smoke_flow.html`, `debug_flow.js` | Dev / debugging harnesses. |
 
 ## Tech
 
