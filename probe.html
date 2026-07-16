@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html><body style="background:#000;color:#39ff88;font-family:monospace;padding:20px">
+<pre id="out">running…</pre>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="./index.html"></script>
+<script>
+// Can't src index.html as script. Inline probe instead by fetching and eval'ing is messy.
+</script>
+<script>
+const out = document.getElementById('out');
+function log(s){ out.textContent += '\n' + s; console.log(s); }
+
+(async () => {
+  try {
+    const html = await fetch('./index.html').then(r => r.text());
+    const m = html.match(/<script src="https:\/\/cdn.jsdelivr[^>]+><\/script>\s*<script>([\s\S]*)<\/script>\s*<\/body>/);
+    if (!m) { log('FAIL: no inline script'); return; }
+    // Strip GLTF loader boot and DOM-heavy bits — just eval physics pieces
+    log('script chars ' + m[1].length);
+    log('has cambered: ' + m[1].includes('function cambered2DProfile'));
+    log('has solvePanel: ' + m[1].includes('function solvePanelSystem'));
+    log('has buildStream: ' + m[1].includes('function buildStreamlines'));
+
+    // Direct minimal physics test
+    function cambered2DProfile(chord, camberFrac, thicknessFrac, nPts = 24) {
+      const pts = [];
+      for (let i = 0; i <= nPts; i++) {
+        const u = i / nPts, x = u * chord;
+        const camber = camberFrac * chord * Math.sin(Math.PI * u);
+        const thickness = thicknessFrac * chord * Math.sin(Math.PI * u) * (1 - u * 0.3);
+        pts.push(new THREE.Vector2(x, camber + thickness));
+      }
+      for (let i = nPts; i >= 0; i--) {
+        const u = i / nPts, x = u * chord;
+        const camber = camberFrac * chord * Math.sin(Math.PI * u);
+        const thickness = thicknessFrac * chord * Math.sin(Math.PI * u) * (1 - u * 0.3);
+        pts.push(new THREE.Vector2(x, camber - thickness));
+      }
+      return pts;
+    }
+    const pts = cambered2DProfile(0.38, -0.09, 0.045, 9);
+    log('profile pts: ' + pts.length);
+
+    // Integrate freestream-only streamline
+    let p = new THREE.Vector3(4.5, 0.5, 0);
+    const path = [p.clone()];
+    for (let i = 0; i < 50; i++) {
+      p = p.clone().add(new THREE.Vector3(-0.06, 0, 0));
+      path.push(p.clone());
+    }
+    const curve = new THREE.CatmullRomCurve3(path);
+    const tube = new THREE.TubeGeometry(curve, 40, 0.028, 6, false);
+    log('tube ok verts=' + tube.attributes.position.count);
+    log('PASS basics');
+  } catch (e) {
+    log('ERR ' + e.message + '\n' + e.stack);
+  }
+})();
+</script>
+</body></html>

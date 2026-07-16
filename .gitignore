@@ -1,0 +1,16 @@
+# Build / deploy artifacts (dist is a copy of index.html + rb19.glb)
+dist/
+
+# Derived/unpacked model data (regenerated from rb19.glb / rb19.zip)
+rb19_extract/
+_extract/
+
+# OS / editor junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.log
+
+# Node (if tooling is ever added locally)
+node_modules/
+.vercel/

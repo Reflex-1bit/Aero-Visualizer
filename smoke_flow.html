@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Aero smoke test</title></head>
+<body style="margin:0;background:#000;color:#39ff88;font-family:monospace">
+<div id="hud" style="position:absolute;z-index:2;padding:12px;font-size:12px"></div>
+<div id="canvas-container" style="position:absolute;inset:0"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const hud = document.getElementById('hud');
+const log = (s) => { hud.innerHTML += s + '<br>'; console.log(s); };
+
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 200);
+camera.position.set(6, 3, 8); camera.lookAt(0, 0.5, 0);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+container.appendChild(renderer.domElement);
+
+let WING_X = -2.55, WING_Y = 0.95;
+function worldToAero(P) { return new THREE.Vector3(P.x - WING_X, P.y - WING_Y, P.z); }
+function aeroToWorld(P) { return new THREE.Vector3(P.x + WING_X, P.y + WING_Y, P.z); }
+
+function cambered2DProfile(chord, camberFrac, thicknessFrac, nPts = 24) {
+  const pts = [];
+  for (let i = 0; i <= nPts; i++) {
+    const u = i / nPts, x = u * chord;
+    const camber = camberFrac * chord * Math.sin(Math.PI * u);
+    const thickness = thicknessFrac * chord * Math.sin(Math.PI * u) * (1 - u * 0.3);
+    pts.push(new THREE.Vector2(x, camber + thickness));
+  }
+  for (let i = nPts; i >= 0; i--) {
+    const u = i / nPts, x = u * chord;
+    const camber = camberFrac * chord * Math.sin(Math.PI * u);
+    const thickness = thicknessFrac * chord * Math.sin(Math.PI * u) * (1 - u * 0.3);
+    pts.push(new THREE.Vector2(x, camber - thickness));
+  }
+  return pts;
+}
+
+const SPAN = 1.65, MAIN_CHORD = 0.38, FLAP_CHORD = 0.20;
+const state = { aoaDeg: 6, flapDeg: 18, windMult: 1, tubeRadius: 0.028, Vinf: 1, gammaMain: -0.2, gammaFlap: -0.1, alphaMainRad: 0, alphaFlapRad: 0 };
+
+function vortexSegmentVelocity(P, A, B, Gamma) {
+  const r1 = new THREE.Vector3().subVectors(P, A);
+  const r2 = new THREE.Vector3().subVectors(P, B);
+  const r0 = new THREE.Vector3().subVectors(B, A);
+  const cross = new THREE.Vector3().crossVectors(r1, r2);
+  const crossMagSq = cross.lengthSq();
+  if (crossMagSq < 0.0025) return new THREE.Vector3();
+  const r1len = r1.length(), r2len = r2.length();
+  if (r1len < 1e-5 || r2len < 1e-5) return new THREE.Vector3();
+  const K = (Gamma / (4 * Math.PI)) * (r0.dot(r1) / r1len - r0.dot(r2) / r2len) / crossMagSq;
+  return cross.multiplyScalar(K);
+}
+function horseshoeVelocity(P, spanHalf, chordX, heightY, Gamma) {
+  const A = new THREE.Vector3(chordX, heightY, -spanHalf);
+  const B = new THREE.Vector3(chordX, heightY, spanHalf);
+  const Adown = new THREE.Vector3(chordX - 40, heightY, -spanHalf);
+  const Bdown = new THREE.Vector3(chordX - 40, heightY, spanHalf);
+  const v = new THREE.Vector3();
+  v.add(vortexSegmentVelocity(P, A, B, Gamma));
+  v.add(vortexSegmentVelocity(P, Adown, A, Gamma));
+  v.add(vortexSegmentVelocity(P, B, Bdown, Gamma));
+  return v;
+}
+function fieldVelocityWorld(P) {
+  const Pl = worldToAero(P);
+  const v = new THREE.Vector3(-state.Vinf, 0, 0);
+  v.add(horseshoeVelocity(Pl, SPAN/2, 0, 0, state.gammaMain));
+  v.add(horseshoeVelocity(Pl, SPAN*0.94/2, MAIN_CHORD*0.72, 0.12, state.gammaFlap));
+  return v;
+}
+
+let streamlineGroup = new THREE.Group(); scene.add(streamlineGroup);
+let flowMarkerGroup = new THREE.Group(); scene.add(flowMarkerGroup);
+let streamPaths = [], markerMeshes = [], flowTime = 0;
+
+function build() {
+  scene.remove(streamlineGroup); scene.remove(flowMarkerGroup);
+  streamlineGroup = new THREE.Group(); flowMarkerGroup = new THREE.Group();
+  streamPaths = []; markerMeshes = [];
+  const RED = new THREE.Color(0xff3b3b), BLUE = new THREE.Color(0x3b9bff);
+  for (let hi = 0; hi < 9; hi++) {
+    const y = 0.12 + (hi/8)*1.35;
+    for (let si = 0; si < 11; si++) {
+      const z = ((si/10)*2-1)*1.15;
+      let p = new THREE.Vector3(4.5, y, z);
+      const pts = [p.clone()];
+      for (let step = 0; step < 140; step++) {
+        const v = fieldVelocityWorld(p);
+        p = p.clone().addScaledVector(v, 0.06);
+        pts.push(p.clone());
+        if (p.x < -5.2) break;
+      }
+      if (pts[0].distanceTo(pts[pts.length-1]) < 0.4) continue;
+      const color = y > WING_Y ? RED : BLUE;
+      const curve = new THREE.CatmullRomCurve3(pts);
+      const tube = new THREE.TubeGeometry(curve, Math.min(80, pts.length), 0.028, 6, false);
+      streamlineGroup.add(new THREE.Mesh(tube, new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0.8, depthWrite:false })));
+      const cum = [0];
+      for (let i=1;i<pts.length;i++) cum.push(cum[i-1]+pts[i].distanceTo(pts[i-1]));
+      streamPaths.push({ points: pts, color, cumLen: cum, totalLen: cum[cum.length-1], phase: Math.random() });
+    }
+  }
+  scene.add(streamlineGroup); scene.add(flowMarkerGroup);
+  const geo = new THREE.SphereGeometry(0.05, 8, 8);
+  streamPaths.forEach((path, pi) => {
+    for (let m=0;m<3;m++) {
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: path.color }));
+      flowMarkerGroup.add(mesh);
+      markerMeshes.push({ mesh, pathIndex: pi, offset: m/3 });
+    }
+  });
+  log('streams=' + streamPaths.length + ' markers=' + markerMeshes.length);
+}
+
+function pointAt(path, s) {
+  const target = ((s % path.totalLen)+path.totalLen)%path.totalLen;
+  for (let i=1;i<path.cumLen.length;i++) {
+    if (path.cumLen[i] >= target) {
+      const f = (target-path.cumLen[i-1])/Math.max(path.cumLen[i]-path.cumLen[i-1],1e-6);
+      return path.points[i-1].clone().lerp(path.points[i], f);
+    }
+  }
+  return path.points[path.points.length-1].clone();
+}
+
+build();
+let last = performance.now();
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = Math.min((now-last)/1000, 0.05); last = now;
+  flowTime += dt * 1.35;
+  markerMeshes.forEach(({mesh, pathIndex, offset}) => {
+    const path = streamPaths[pathIndex];
+    if (!path) return;
+    mesh.position.copy(pointAt(path, flowTime*path.totalLen*0.55 + offset*path.totalLen + path.phase*path.totalLen));
+  });
+  renderer.render(scene, camera);
+}
+animate();
+log('smoke test running — you should see red/blue tubes + moving dots');
+</script>
+</body>
+</html>

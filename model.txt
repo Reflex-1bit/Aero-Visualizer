@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>F1 Car — Stylized Model</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: 'Inter', sans-serif; }
+  #canvas-container { position: absolute; inset: 0; }
+  .hud { position: absolute; color: #d8f5ff; pointer-events: none; user-select: none; }
+  .title-block { top: 28px; left: 32px; }
+  .title-block .eyebrow {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.25em;
+    color: #39ff88; text-transform: uppercase; margin-bottom: 6px;
+  }
+  .title-block h1 { font-size: 22px; font-weight: 600; color: #f0feff; }
+  .title-block .sub { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5b8a91; margin-top: 4px; }
+  .hint { position: absolute; bottom: 28px; left: 32px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #2e4448; }
+  .caption {
+    position: absolute; bottom: 28px; right: 32px; max-width: 280px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; line-height: 1.6; color: #3d5459; text-align: right;
+  }
+  .view-presets { position: absolute; top: 28px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; pointer-events: auto; }
+  .view-btn {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(127,176,184,0.25); color: #7fb0b8;
+    padding: 7px 14px; cursor: pointer; transition: all 0.15s ease;
+  }
+  .view-btn:hover { border-color: #39ff88; color: #d8f5ff; }
+  .view-btn.active { background: rgba(57,255,136,0.12); border-color: #39ff88; color: #39ff88; }
+</style>
+</head>
+<body>
+<div id="canvas-container"></div>
+<div class="hud title-block">
+  <div class="eyebrow">Stylized Geometry — No Physics</div>
+  <h1>F1 Car</h1>
+  <div class="sub">approximate silhouette · not a real regulation car</div>
+</div>
+<div class="hint">drag to orbit · scroll to zoom</div>
+<div class="view-presets">
+  <button class="view-btn active" id="view-3q">3/4</button>
+  <button class="view-btn" id="view-side">Side</button>
+  <button class="view-btn" id="view-front">Front</button>
+  <button class="view-btn" id="view-top">Top</button>
+  <button class="view-btn" id="view-rear">Rear</button>
+</div>
+<div class="caption">
+  Geometry only — assembled from primitive shapes to<br>
+  approximate an F1 car's proportions. No aerodynamic<br>
+  solver attached (a full car isn't something the rear-wing<br>
+  panel method can handle — see chat).
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ============================================================
+// SCENE SETUP
+// ============================================================
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x000000, 0.03);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 200);
+let camDist = 9, camTheta = 0.9, camPhi = 1.15;
+function updateCamera() {
+  camera.position.set(
+    camDist * Math.sin(camPhi) * Math.cos(camTheta),
+    camDist * Math.cos(camPhi),
+    camDist * Math.sin(camPhi) * Math.sin(camTheta)
+  );
+  camera.lookAt(0, 0.3, 0);
+}
+updateCamera();
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x000000, 1);
+container.appendChild(renderer.domElement);
+
+let isDragging = false, lastX = 0, lastY = 0;
+renderer.domElement.addEventListener('mousedown', e => { isDragging = true; lastX = e.clientX; lastY = e.clientY; });
+window.addEventListener('mouseup', () => isDragging = false);
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  camTheta -= dx * 0.005;
+  camPhi = Math.max(0.15, Math.min(Math.PI - 0.15, camPhi - dy * 0.005));
+  lastX = e.clientX; lastY = e.clientY;
+  updateCamera();
+});
+renderer.domElement.addEventListener('wheel', e => {
+  camDist = Math.max(3, Math.min(25, camDist + e.deltaY * 0.008));
+  updateCamera();
+  e.preventDefault();
+}, { passive: false });
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ============================================================
+// VIEW PRESETS
+// ============================================================
+const viewPresets = {
+  '3q':    { theta: 0.9, phi: 1.15, dist: 9 },
+  side:    { theta: Math.PI/2, phi: 1.5, dist: 8 },
+  front:   { theta: 0, phi: 1.35, dist: 7 },
+  top:     { theta: 0.9, phi: 0.2, dist: 10 },
+  rear:    { theta: Math.PI, phi: 1.35, dist: 7 },
+};
+function setView(name) {
+  const p = viewPresets[name];
+  camTheta = p.theta; camPhi = p.phi; camDist = p.dist;
+  updateCamera();
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+}
+['3q','side','front','top','rear'].forEach(name => {
+  document.getElementById('view-' + name).addEventListener('click', () => setView(name));
+});
+renderer.domElement.addEventListener('mousedown', () => {
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+});
+
+// ============================================================
+// CAR GEOMETRY
+// Coordinate convention: x = length (front positive), y = up, z = width (span)
+// Rough proportions loosely inspired by modern F1 dimensions (car length ~5.5m,
+// width ~2m), scaled down to a manageable scene unit (1 unit ≈ 1m here).
+// ============================================================
+const carGroup = new THREE.Group();
+scene.add(carGroup);
+
+const NEON_WHITE = 0xf4f8ff;
+const NEON_CYAN = 0x00d4ff;
+const NEON_GOLD = 0xffc966;
+
+function wireMesh(geo, color, opacity = 0.85) {
+  const edges = new THREE.EdgesGeometry(geo, 15);
+  return new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
+}
+function solidMesh(geo, color, opacity = 0.12) {
+  return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity }));
+}
+function addBoth(geo, color, group, opacity=0.12) {
+  group.add(solidMesh(geo, color, opacity));
+  group.add(wireMesh(geo, color));
+}
+
+// --- Nose cone (tapered, front of car) ---
+{
+  const noseShape = new THREE.Shape();
+  noseShape.moveTo(0, -0.05);
+  noseShape.lineTo(0, 0.15);
+  noseShape.lineTo(1.4, 0.32);
+  noseShape.lineTo(1.4, -0.12);
+  noseShape.lineTo(0, -0.05);
+  const noseGeo = new THREE.ExtrudeGeometry(noseShape, { depth: 0.28, bevelEnabled: false });
+  noseGeo.translate(0, 0, -0.14);
+  noseGeo.rotateY(Math.PI); // point forward (+x)
+  noseGeo.translate(2.55, 0.35, 0);
+  addBoth(noseGeo, NEON_WHITE, carGroup, 0.15);
+}
+
+// --- Front wing (2-element, similar approach to the rear wing project) ---
+function cambered2DProfile(chord, camberFrac, thicknessFrac, nPts = 16) {
+  const pts = [];
+  for (let i = 0; i <= nPts; i++) {
+    const t = i / nPts, x = t * chord;
+    const camber = camberFrac * chord * Math.sin(Math.PI * t);
+    const thick = thicknessFrac * chord * Math.sin(Math.PI * t) * (1 - t * 0.3);
+    pts.push(new THREE.Vector2(x, camber + thick));
+  }
+  for (let i = nPts; i >= 0; i--) {
+    const t = i / nPts, x = t * chord;
+    const camber = camberFrac * chord * Math.sin(Math.PI * t);
+    const thick = thicknessFrac * chord * Math.sin(Math.PI * t) * (1 - t * 0.3);
+    pts.push(new THREE.Vector2(x, camber - thick));
+  }
+  return pts;
+}
+function buildWingElement(chord, span, camberFrac, thicknessFrac) {
+  const shape = new THREE.Shape(cambered2DProfile(chord, camberFrac, thicknessFrac));
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: span, bevelEnabled: false, curveSegments: 10 });
+  geo.translate(-chord * 0.5, 0, -span / 2);
+  return geo;
+}
+{
+  const fwMainGeo = buildWingElement(0.32, 1.75, 0.06, 0.02);
+  fwMainGeo.translate(3.65, 0.06, 0);
+  addBoth(fwMainGeo, NEON_GOLD, carGroup, 0.18);
+
+  const fwFlapGeo = buildWingElement(0.16, 1.65, 0.10, 0.018);
+  fwFlapGeo.translate(3.78, 0.16, 0);
+  addBoth(fwFlapGeo, NEON_GOLD, carGroup, 0.18);
+
+  // front wing endplates
+  for (const side of [-1, 1]) {
+    const plateGeo = new THREE.BoxGeometry(0.5, 0.35, 0.015);
+    plateGeo.translate(3.65, 0.15, side * 0.88);
+    addBoth(plateGeo, NEON_WHITE, carGroup, 0.1);
+  }
+}
+
+// --- Chassis / survival cell (main body) ---
+{
+  const chassisGeo = new THREE.BoxGeometry(2.6, 0.55, 0.85);
+  chassisGeo.translate(1.0, 0.42, 0);
+  addBoth(chassisGeo, NEON_WHITE, carGroup, 0.14);
+
+  // cockpit taper (rough)
+  const cockpitShape = new THREE.Shape();
+  cockpitShape.moveTo(-0.5, 0);
+  cockpitShape.lineTo(0.5, 0);
+  cockpitShape.lineTo(0.35, 0.32);
+  cockpitShape.lineTo(-0.35, 0.32);
+  cockpitShape.lineTo(-0.5, 0);
+  const cockpitGeo = new THREE.ExtrudeGeometry(cockpitShape, { depth: 0.7, bevelEnabled: false });
+  cockpitGeo.rotateX(-Math.PI / 2);
+  cockpitGeo.translate(0.9, 0.68, -0.35);
+  addBoth(cockpitGeo, NEON_WHITE, carGroup, 0.14);
+
+  // halo (simple loop)
+  const haloCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(1.15, 0.72, 0),
+    new THREE.Vector3(0.75, 1.05, 0),
+    new THREE.Vector3(0.35, 1.02, 0),
+    new THREE.Vector3(0.15, 0.72, 0),
+  ]);
+  const haloGeo = new THREE.TubeGeometry(haloCurve, 20, 0.025, 6, false);
+  carGroup.add(solidMesh(haloGeo, NEON_CYAN, 0.5));
+  const haloSideL = new THREE.CylinderGeometry(0.02, 0.02, 0.62, 6);
+  haloSideL.rotateZ(Math.PI/2.6);
+  haloSideL.translate(0.55, 0.9, -0.32);
+  carGroup.add(solidMesh(haloSideL, NEON_CYAN, 0.5));
+  const haloSideR = haloSideL.clone();
+  haloSideR.translate(0, 0, 0.64);
+  carGroup.add(solidMesh(haloSideR, NEON_CYAN, 0.5));
+}
+
+// --- Sidepods ---
+for (const side of [-1, 1]) {
+  const podShape = new THREE.Shape();
+  podShape.moveTo(0, 0);
+  podShape.lineTo(1.3, 0);
+  podShape.lineTo(1.15, 0.38);
+  podShape.lineTo(0.25, 0.45);
+  podShape.lineTo(0, 0.15);
+  const podGeo = new THREE.ExtrudeGeometry(podShape, { depth: 0.34, bevelEnabled: false });
+  podGeo.translate(-0.1, 0.1, side > 0 ? 0.42 : (-0.42 - 0.34));
+  addBoth(podGeo, NEON_WHITE, carGroup, 0.14);
+}
+
+// --- Engine cover / rear bodywork tapering to the rear wing ---
+{
+  const coverShape = new THREE.Shape();
+  coverShape.moveTo(0, 0);
+  coverShape.lineTo(1.5, 0);
+  coverShape.lineTo(1.5, 0.22);
+  coverShape.lineTo(0.2, 0.5);
+  coverShape.lineTo(0, 0.3);
+  const coverGeo = new THREE.ExtrudeGeometry(coverShape, { depth: 0.5, bevelEnabled: false });
+  coverGeo.translate(-2.4, 0.35, -0.25);
+  addBoth(coverGeo, NEON_WHITE, carGroup, 0.14);
+}
+
+// --- Floor / diffuser (flat plane with simple diffuser channels at the rear) ---
+{
+  const floorGeo = new THREE.BoxGeometry(4.2, 0.02, 1.6);
+  floorGeo.translate(0.2, 0.03, 0);
+  addBoth(floorGeo, NEON_CYAN, carGroup, 0.06);
+
+  // diffuser ramp
+  const diffShape = new THREE.Shape();
+  diffShape.moveTo(0, 0);
+  diffShape.lineTo(0.9, 0);
+  diffShape.lineTo(0.9, 0.35);
+  diffShape.lineTo(0, 0.05);
+  const diffGeo = new THREE.ExtrudeGeometry(diffShape, { depth: 1.5, bevelEnabled: false });
+  diffGeo.rotateY(Math.PI);
+  diffGeo.translate(-2.7, 0.03, -0.75);
+  addBoth(diffGeo, NEON_CYAN, carGroup, 0.1);
+}
+
+// --- Rear wing (reusing the corrected 2-element geometry from the wing project) ---
+{
+  const RW_SPAN = 1.6, RW_MAIN_CHORD = 0.34, RW_FLAP_CHORD = 0.17;
+  const mainGeo = buildWingElement(RW_MAIN_CHORD, RW_SPAN, -0.09, 0.03);
+  mainGeo.translate(-3.55, 0.85, 0);
+  addBoth(mainGeo, NEON_WHITE, carGroup, 0.16);
+
+  const flapGeo = buildWingElement(RW_FLAP_CHORD, RW_SPAN * 0.94, -0.14, 0.025);
+  flapGeo.translate(-3.75, 0.98, 0); // sits behind (more -x) and slightly above the main plane
+  addBoth(flapGeo, NEON_GOLD, carGroup, 0.18);
+
+  // rear wing endplates (sized to enclose both elements, lesson learned from the wing project)
+  for (const side of [-1, 1]) {
+    const plateShape = new THREE.Shape([
+      new THREE.Vector2(-0.30, -0.02),
+      new THREE.Vector2(0.22, -0.02),
+      new THREE.Vector2(0.20, 0.28),
+      new THREE.Vector2(-0.05, 0.34),
+      new THREE.Vector2(-0.28, 0.22),
+    ]);
+    const plateGeo = new THREE.ExtrudeGeometry(plateShape, { depth: 0.012, bevelEnabled: false });
+    plateGeo.translate(-3.65, 0.83, side * RW_SPAN/2);
+    addBoth(plateGeo, NEON_WHITE, carGroup, 0.12);
+  }
+}
+
+// --- Wheels (4x, simple cylinders) ---
+function buildWheel(x, z) {
+  const wheelGroup = new THREE.Group();
+  const tireGeo = new THREE.CylinderGeometry(0.33, 0.33, 0.32, 20);
+  tireGeo.rotateX(Math.PI / 2);
+  wheelGroup.add(wireMesh(tireGeo, NEON_WHITE, 0.7));
+  wheelGroup.add(solidMesh(tireGeo, NEON_WHITE, 0.08));
+  const rimGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.33, 12);
+  rimGeo.rotateX(Math.PI / 2);
+  wheelGroup.add(wireMesh(rimGeo, NEON_CYAN, 0.6));
+  wheelGroup.position.set(x, 0.33, z);
+  return wheelGroup;
+}
+carGroup.add(buildWheel(2.15, 0.95));
+carGroup.add(buildWheel(2.15, -0.95));
+carGroup.add(buildWheel(-2.05, 0.85));
+carGroup.add(buildWheel(-2.05, -0.85));
+
+// Center the whole car roughly at the origin
+carGroup.position.x = -0.3;
+
+// Ground grid
+const grid = new THREE.GridHelper(20, 30, 0x0a2a2e, 0x0a2a2e);
+grid.position.y = 0;
+scene.add(grid);
+
+// ============================================================
+// RENDER LOOP
+// ============================================================
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
