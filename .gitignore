@@ -5,6 +5,9 @@ dist/
 rb19_extract/
 _extract/
 
+# Local backup of the pre-Draco model (regenerate if needed)
+rb19.original.glb
+
 # OS / editor junk
 Thumbs.db
 Desktop.ini
