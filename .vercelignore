@@ -1,0 +1,6 @@
+# Only ship what the site needs; the rest of the repo (data, ML notebook,
+# CUDA pipeline, dev tools) stays out of the deployment.
+/*
+!index.html
+!rb19.glb
+!flow
