@@ -17,3 +17,14 @@ Desktop.ini
 # Node (if tooling is ever added locally)
 node_modules/
 .vercel/
+
+# CUDA CFD pipeline: build outputs, exported geometry, grids and raw results
+# (regenerate with the steps in cuda/README.md; only flow/*.flow is shipped)
+cuda/*.exe
+cuda/*.exp
+cuda/*.lib
+cuda/geom/
+cuda/out/
+cuda/grid_*.bin
+cuda/grid_*.json
+__pycache__/

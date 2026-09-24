@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Geometry export</title></head>
+<body style="background:#000;color:#39ff88;font:12px monospace">
+<pre id="log">loading index.html…</pre>
+<iframe id="app" src="../index.html" style="width:800px;height:500px;border:0"></iframe>
+<script>
+// Pulls the exact world-space part triangles out of the running app and posts
+// them to cuda/export_server.py. Run that server, then open this page.
+const log = m => { document.getElementById('log').textContent += '\n' + m; };
+const app = document.getElementById('app');
+async function post(name, body) {
+  const r = await fetch('/__export/' + name, { method: 'POST', body });
+  if (!r.ok) throw new Error(name + ': ' + r.status);
+}
+async function run() {
+  const w = app.contentWindow;
+  let ready = false;
+  try { ready = w.eval('aeroReady'); } catch (e) {}
+  if (!ready) return setTimeout(run, 250);
+  const parts = w.eval('PART_IDS');
+  const meta = { parts: {} };
+  for (const id of parts) {
+    const tris = new Float32Array(w.eval('partData')[id].tris);
+    meta.parts[id] = tris.length / 9;
+    await post(id + '.f32', tris);
+    log(id + ': ' + tris.length / 9 + ' triangles');
+  }
+  meta.wing = w.eval('({ WING_X, WING_Y, SPAN, MAIN_CHORD, FLAP_CHORD, CAR_NOSE_X, CAR_REAR_X, CAR_MIN_Y, CAR_MAX_Y })');
+  await post('meta.json', JSON.stringify(meta, null, 2));
+  log('done');
+  document.title = 'EXPORT DONE';
+}
+// The app defers its build with requestAnimationFrame, which never fires in a
+// hidden/background window. Swap in a timer-based rAF as soon as the iframe's
+// window exists (well before the model finishes downloading).
+(function patchRaf() {
+  const w = app.contentWindow;
+  if (w && w.document && w.document.readyState !== 'uninitialized' && w.location.href.includes('index.html')) {
+    w.requestAnimationFrame = cb => w.setTimeout(() => cb(w.performance.now()), 16);
+    return;
+  }
+  setTimeout(patchRaf, 5);
+})();
+app.addEventListener('load', run);
+</script>
+</body>
+</html>

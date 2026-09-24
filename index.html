@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>F1 Car — Aero Flow · ML + Horseshoe</title>
+<title>F1 Car — Aero Flow · CUDA CFD</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap');
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -25,7 +25,7 @@
   .hint { position: absolute; bottom: 118px; left: 32px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #2e4448; }
   .caption {
     position: absolute; bottom: 28px; right: 32px; max-width: 300px;
-    font-family: 'JetBrains Mono', monospace; font-size: 10px; line-height: 1.6; color: #3d5459; text-align: right;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; line-height: 1.6; color: #5f7f86; text-align: right;
   }
   .view-presets { position: absolute; top: 28px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; pointer-events: auto; }
   .view-btn {
@@ -56,6 +56,22 @@
   .ctrl input[type="range"]::-moz-range-thumb {
     width: 12px; height: 12px; border: none; border-radius: 50%; background: #39ff88; cursor: pointer;
   }
+  .seg { display: flex; gap: 4px; }
+  .seg-btn {
+    font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(127,176,184,0.25); color: #7fb0b8;
+    padding: 4px 8px; cursor: pointer; flex: 1;
+  }
+  .seg-btn.active { background: rgba(57,255,136,0.12); border-color: #39ff88; color: #39ff88; }
+  .legend {
+    display: flex; align-items: center; gap: 6px; margin-top: 6px;
+    font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #7fb0b8;
+  }
+  .legend i {
+    flex: 1; height: 4px; border-radius: 2px;
+    background: linear-gradient(90deg, hsl(238,100%,52%), hsl(180,100%,52%), hsl(120,100%,52%), hsl(60,100%,52%), hsl(0,100%,52%));
+  }
+  .caption .num { color: #39ff88; }
   #loading {
     position: absolute; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 14px;
@@ -161,13 +177,17 @@
     <div class="label"><span>Line thickness</span><span class="val" id="thickness-val">0.005</span></div>
     <input type="range" id="thickness" min="0.002" max="0.009" step="0.001" value="0.005">
   </div>
+  <div class="ctrl" id="color-ctrl" hidden>
+    <div class="label"><span>Colour by</span></div>
+    <div class="seg">
+      <button class="seg-btn active" data-color="speed">Speed</button>
+      <button class="seg-btn" data-color="pressure">Pressure</button>
+      <button class="seg-btn" data-color="height">Height</button>
+    </div>
+    <div class="legend" id="legend"><span id="legend-lo">0.0×U</span><i></i><span id="legend-hi">1.5×U</span></div>
+  </div>
 </div>
-<div class="caption">
-  ML-trained section C<sub>l</sub> feeds a horseshoe-vortex +<br>
-  source-panel solve. Rear wing = trained neural net +<br>
-  horseshoe/panel method; other parts = freestream<br>
-  deflected around the solid body.
-</div>
+<div class="caption" id="caption"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
@@ -401,7 +421,7 @@ function applyPartSelection(id) {
     }
   });
   voxelizeTris(currentPartTriArrays(), 0.11);
-  if (partUsesWing()) clearWingVoxels(WING_X + MAIN_CHORD * 0.15, WING_Y + 0.04, 0.9, 0.45, SPAN * 0.62);
+  if (partUsesWing() && !cfd) clearWingVoxels(WING_X + MAIN_CHORD * 0.15, WING_Y + 0.04, 0.9, 0.45, SPAN * 0.62);
   document.querySelectorAll('.part-btn').forEach(b => b.classList.toggle('active', b.dataset.part === id));
   const pn = document.getElementById('part-readout');
   if (pn) pn.textContent = id === 'all' ? 'Full car' : PART_LABELS[id];
@@ -477,6 +497,7 @@ function carSolidAt(p) {
 }
 
 function inRearWingCorridor(p) {
+  if (cfd) return false; // the CFD resolves the wing itself; keep it solid
   if (Math.abs(p.z) > SPAN * 0.62) return false;
   if (p.x > WING_X + 1.05 || p.x < WING_X - 2.0) return false;
   if (p.y < WING_Y - 0.38 || p.y > WING_Y + 0.55) return false;
@@ -668,6 +689,88 @@ let CAR_NOSE_X = 3.0, CAR_MIN_Y = 0.0, CAR_MAX_Y = 1.4, CAR_REAR_X = -3.0;
 function worldToAero(P) { return new THREE.Vector3(P.x - WING_X, P.y - WING_Y, P.z); }
 function aeroToWorld(P) { return new THREE.Vector3(P.x + WING_X, P.y + WING_Y, P.z); }
 function fieldVelocityWorld(Pworld) { return fieldVelocity(worldToAero(Pworld)); }
+
+// ============================================================
+// CFD FLOW FIELD - time-averaged velocity + pressure from the CUDA lattice
+// Boltzmann solver in cuda/ (see cuda/README.md). When it loads, streamlines
+// are traced straight through the simulated air; the hand-tuned model above
+// is only a fallback if the file is missing.
+// ============================================================
+let cfd = null; // { nx, ny, nz, dx, ox, oy, oz, vs, ps, data:Int8Array, cd, cl }
+
+async function loadFlowField(url, onProgress) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(url + ': ' + res.status);
+  const total = +res.headers.get('Content-Length') || 0;
+  let got = 0;
+  const counted = new TransformStream({
+    transform(chunk, ctl) { got += chunk.length; if (total && onProgress) onProgress(got / total); ctl.enqueue(chunk); }
+  });
+  const buf = await new Response(res.body.pipeThrough(counted).pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  const hlen = new DataView(buf).getUint32(0, true);
+  const h = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, hlen)));
+  return {
+    nx: h.nx, ny: h.ny, nz: h.nz, dx: h.dx, ox: h.origin[0], oy: h.origin[1], oz: h.origin[2],
+    vs: h.vscale, ps: h.pscale, cd: h.cd, cl: h.cl, simDx: h.sim_dx,
+    data: new Int8Array(buf, 4 + hlen),
+  };
+}
+
+// Trilinear sample at a world point -> { v: velocity / U, cp }. Outside the
+// simulated box the air is undisturbed freestream.
+const _cfdOut = { v: new THREE.Vector3(), cp: 0 };
+function sampleCFD(p) {
+  const { nx, ny, nz, dx, ox, oy, oz, vs, ps, data } = cfd;
+  const fx = (p.x - ox) / dx - 0.5, fy = (p.y - oy) / dx - 0.5, fz = (p.z - oz) / dx - 0.5;
+  if (fx < 0 || fz < 0 || fx > nx - 1 || fy > ny - 1 || fz > nz - 1) {
+    _cfdOut.v.set(-1, 0, 0); _cfdOut.cp = 0; return _cfdOut;
+  }
+  const cy = Math.max(0, fy);
+  const x0 = Math.min(nx - 2, Math.floor(fx)), y0 = Math.min(ny - 2, Math.floor(cy)), z0 = Math.min(nz - 2, Math.floor(fz));
+  const tx = fx - x0, ty = cy - y0, tz = fz - z0;
+  let vx = 0, vy = 0, vz = 0, pc = 0;
+  for (let k = 0; k < 8; k++) {
+    const ix = k & 1, iy = (k >> 1) & 1, iz = k >> 2;
+    const w = (ix ? tx : 1 - tx) * (iy ? ty : 1 - ty) * (iz ? tz : 1 - tz);
+    const o = 4 * ((x0 + ix) + nx * ((y0 + iy) + ny * (z0 + iz)));
+    vx += w * data[o]; vy += w * data[o + 1]; vz += w * data[o + 2]; pc += w * data[o + 3];
+  }
+  _cfdOut.v.set(vx * vs, vy * vs, vz * vs); _cfdOut.cp = pc * ps;
+  return _cfdOut;
+}
+
+// Trace a streamline through the CFD field with fixed arc-length RK2 steps, so
+// slow regions (wake, stagnation) keep their shape instead of bunching up.
+function integrateStreamlineCFD(seedWorld, xStopWorld) {
+  const ds = 0.035, maxSteps = 520;
+  let p = clampToGroundWorld(seedWorld.clone(), null);
+  const pts = [p.clone()];
+  let stalled = 0;
+  for (let i = 0; i < maxSteps; i++) {
+    const v0 = sampleCFD(p).v.clone();
+    const s0 = v0.length();
+    if (s0 < 1e-3) break;
+    const mid = p.clone().addScaledVector(v0, 0.5 * ds / s0);
+    const v1 = sampleCFD(mid).v;
+    const s1 = v1.length();
+    if (s1 < 1e-3) break;
+    const prev = p;
+    p = p.clone().addScaledVector(v1, ds / s1);
+    p = clampToGroundWorld(resolvePenetration(p), prev);
+    pts.push(p.clone());
+    stalled = s1 < 0.05 ? stalled + 1 : 0;    // trapped in a dead-air pocket
+    if (stalled > 40) break;
+    if (p.x < cfd.ox + 0.1 || (xStopWorld != null && p.x < xStopWorld) ||
+        Math.abs(p.z) > SPAN * 1.8 || p.y > CAR_MAX_Y + 1.2) break;
+  }
+  return pts;
+}
+
+// World-space streamline through whichever flow model is active.
+function traceStreamline(seedWorld, xStopWorld) {
+  if (cfd) return integrateStreamlineCFD(seedWorld, xStopWorld);
+  return integrateStreamline(worldToAero(seedWorld), xStopWorld).map(q => aeroToWorld(q));
+}
 
 // PANEL
 function cambered2DProfile(chord, camberFrac, thicknessFrac, nPts = 24) {
@@ -906,6 +1009,7 @@ function recompute() {
   const CDi = (CL * CL) / (Math.PI * ARest * 0.85);
 
   solvePanelSystem();
+  applyFlowReadout();
   buildStreamlines();
 }
 
@@ -1049,6 +1153,16 @@ function pathTouchesCar(ptsW) {
   // In isolated-part view the streams are intentionally seeded tightly around
   // the part (and wing voxels get cleared for the panel solve), so don't filter.
   if (activePart !== 'all') return true;
+  if (cfd) {
+    // Real flow slides past the body rather than into it: keep streams that
+    // pass within ~4 voxels (~0.45) of the car.
+    const q = new THREE.Vector3(), offs = [[0, 0, 0]];
+    for (const r of [carVoxels.cell * 2, carVoxels.cell * 4])
+      offs.push([r, 0, 0], [-r, 0, 0], [0, r, 0], [0, -r, 0], [0, 0, r], [0, 0, -r]);
+    for (let i = 0; i < ptsW.length; i += 2)
+      for (const o of offs) if (carSolidAt(q.set(ptsW[i].x + o[0], ptsW[i].y + o[1], ptsW[i].z + o[2]))) return true;
+    return false;
+  }
   for (let i = 0; i < ptsW.length; i++) {
     const p = ptsW[i];
     if (carOccupancy(p.x, p.y, p.z) > 0.02) return true;
@@ -1066,7 +1180,8 @@ function addStreamPath(ptsW, side) {
   ptsW = smoothPath(ptsW, 2);
   const floorY = GROUND_Y + state.tubeRadius;
   for (const q of ptsW) if (q.y < floorY) q.y = floorY;
-  const color = side > 0 ? RED : BLUE;
+  const byField = cfd && colorMode !== 'height';
+  const color = byField ? MARKER_WHITE : (side > 0 ? RED : BLUE);
   // Treat the ground as a solid floor: sample the spline, clamp every sample to
   // the floor, and rebuild — so no segment can bow below the ground.
   const segs = Math.max(24, Math.min(160, ptsW.length));
@@ -1076,12 +1191,74 @@ function addStreamPath(ptsW, side) {
   curve = new THREE.CatmullRomCurve3(sampled, false, 'centripetal');
   ptsW = sampled;
   const tubeGeo = new THREE.TubeGeometry(curve, segs, state.tubeRadius, 8, false);
+  if (byField) paintTube(tubeGeo, curve, segs, 8);
   streamlineGroup.add(new THREE.Mesh(tubeGeo, new THREE.MeshBasicMaterial({
-    color, transparent: true, opacity: 0.72, depthTest: false, depthWrite: false
+    color: byField ? 0xffffff : color, vertexColors: byField,
+    transparent: true, opacity: byField ? 0.85 : 0.72, depthTest: false, depthWrite: false
   })));
   const cumLen = [0];
   for (let i = 1; i < ptsW.length; i++) cumLen.push(cumLen[i - 1] + ptsW[i].distanceTo(ptsW[i - 1]));
   streamPaths.push({ points: ptsW, color, cumLen, totalLen: cumLen[cumLen.length - 1], phase: Math.random() * 0.15 });
+}
+
+// ---- Colour streamlines by the simulated field ----
+let colorMode = 'speed';
+const MARKER_WHITE = new THREE.Color(0xf4f8ff);
+const COLOR_RANGES = {
+  speed: { lo: 0, hi: 1.5, label: v => v.toFixed(1) + '×U', value: s => s.v.length() },
+  pressure: { lo: -1.5, hi: 1, label: v => 'Cp ' + v.toFixed(1), value: s => s.cp },
+};
+const _fc = new THREE.Color();
+function fieldColor(t) {
+  // blue (slow / suction) -> cyan -> green -> yellow -> red (fast / high pressure)
+  return _fc.setHSL(0.66 * (1 - Math.max(0, Math.min(1, t))), 1, 0.52);
+}
+function paintTube(geo, curve, segs, radial) {
+  const r = COLOR_RANGES[colorMode];
+  const cols = new Float32Array(geo.attributes.position.count * 3);
+  for (let i = 0; i <= segs; i++) {
+    const c = fieldColor((r.value(sampleCFD(curve.getPointAt(i / segs))) - r.lo) / (r.hi - r.lo));
+    for (let j = 0; j <= radial; j++) {
+      const o = 3 * (i * (radial + 1) + j);
+      cols[o] = c.r; cols[o + 1] = c.g; cols[o + 2] = c.b;
+    }
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+}
+function setColorMode(mode) {
+  colorMode = mode;
+  document.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b.dataset.color === mode));
+  const r = COLOR_RANGES[mode], legend = document.getElementById('legend');
+  legend.style.display = r ? '' : 'none';
+  if (r) {
+    document.getElementById('legend-lo').textContent = r.label(r.lo);
+    document.getElementById('legend-hi').textContent = r.label(r.hi);
+  }
+  if (aeroReady) buildStreamlines();
+}
+document.querySelectorAll('.seg-btn').forEach(b => b.addEventListener('click', () => setColorMode(b.dataset.color)));
+
+// HUD text describing whichever flow model is live.
+function applyFlowReadout() {
+  const sub = document.querySelector('.title-block .sub');
+  const cap = document.getElementById('caption');
+  const ml = state.clMain != null ? state.clMain.toFixed(2) : '—';
+  if (cfd) {
+    sub.textContent = 'CUDA lattice-Boltzmann CFD · ML section Cl';
+    document.getElementById('color-ctrl').hidden = false;
+    const f = v => (v == null ? '—' : v.toFixed(2));
+    cap.innerHTML =
+      'Time-averaged CFD: D3Q19 lattice Boltzmann + LES,<br>' +
+      'rolling road, ' + +(cfd.simDx * 100).toFixed(2) + ' cm cells, run on CUDA.<br>' +
+      '<span class="num">Cd ' + f(cfd.cd) + ' · Cl ' + f(cfd.cl) + '</span> (whole car, Cl &lt; 0 = downforce)<br>' +
+      'Rear-wing section C<sub>l</sub> (ML net): <span class="num">' + ml + '</span>';
+  } else {
+    cap.innerHTML =
+      'ML-trained section C<sub>l</sub> feeds a horseshoe-vortex +<br>' +
+      'source-panel solve. Rear wing = trained neural net +<br>' +
+      'horseshoe/panel method; other parts = freestream<br>' +
+      'deflected around the solid body.';
+  }
 }
 
 function buildStreamlines() {
@@ -1106,10 +1283,8 @@ function buildFullCarStreamlines() {
     const yWorld = yLo + (yHi - yLo) * (hi / (N_HEIGHT_SEEDS - 1));
     for (let si = 0; si < N_SPAN_SEEDS; si++) {
       const z = ((si / (N_SPAN_SEEDS - 1)) * 2 - 1) * SPAN * 0.95;
-      const seedAero = worldToAero(new THREE.Vector3(seedWorldX, yWorld, z));
       const side = (yWorld > mid) ? 1 : -1;
-      const ptsW = integrateStreamline(seedAero).map((q) => aeroToWorld(q));
-      addStreamPath(ptsW, side);
+      addStreamPath(traceStreamline(new THREE.Vector3(seedWorldX, yWorld, z)), side);
     }
   }
   // Extra side-hugging seeds at several heights that ride along the flanks so
@@ -1119,9 +1294,7 @@ function buildFullCarStreamlines() {
     const yWorld = yLo + (yHi - yLo) * (0.15 + 0.62 * (hi / 3));
     for (const zFrac of flankZ) {
       const z = zFrac * SPAN;
-      const seedAero = worldToAero(new THREE.Vector3(seedWorldX, yWorld, z));
-      const ptsW = integrateStreamline(seedAero).map((q) => aeroToWorld(q));
-      addStreamPath(ptsW, zFrac > 0 ? 1 : -1);
+      addStreamPath(traceStreamline(new THREE.Vector3(seedWorldX, yWorld, z)), zFrac > 0 ? 1 : -1);
     }
   }
 }
@@ -1144,10 +1317,8 @@ function buildPartStreamlines(pd) {
     const yWorld = yLo + (yHi - yLo) * (hi / (nH - 1));
     for (let si = 0; si < nS; si++) {
       const z = zc + (nS === 1 ? 0 : ((si / (nS - 1)) * 2 - 1) * zHalf);
-      const seedAero = worldToAero(new THREE.Vector3(seedWorldX, yWorld, z));
       const side = (yWorld > mid) ? 1 : -1;
-      const ptsW = integrateStreamline(seedAero, xStop).map((q) => aeroToWorld(q));
-      addStreamPath(ptsW, side);
+      addStreamPath(traceStreamline(new THREE.Vector3(seedWorldX, yWorld, z), xStop), side);
     }
   }
 }
@@ -1360,19 +1531,30 @@ function buildScene(gltf) {
   document.getElementById('loading').classList.add('hidden');
   aeroReady = true;
   voxelizeTris(currentPartTriArrays(), 0.11);
-  clearWingVoxels(WING_X + MAIN_CHORD * 0.15, WING_Y + 0.04, 0.9, 0.45, SPAN * 0.62);
+  if (!cfd) clearWingVoxels(WING_X + MAIN_CHORD * 0.15, WING_Y + 0.04, 0.9, 0.45, SPAN * 0.62);
   recompute();            // solve rear-wing panels + gammas once
   applyPartSelection('all');
 }
 
+const loadFrac = { car: 0, flow: 0 };
+const bumpLoad = () => setLoadProgress(0.55 * loadFrac.car + 0.4 * loadFrac.flow);
+const flowPromise = loadFlowField('./flow/rb19.flow', f => { loadFrac.flow = f; bumpLoad(); })
+  .catch(err => { console.warn('CFD flow field unavailable, using the analytic flow model.', err); return null; });
 gltfLoader.load('./rb19.glb', (gltf) => {
+  loadFrac.car = 1; bumpLoad();
   const ls = document.getElementById('load-status');
-  if (ls) ls.textContent = 'Building aero…';
-  setLoadProgress(1);
-  // Yield a frame so the "Building aero…" state paints before the heavy synchronous build.
-  requestAnimationFrame(() => setTimeout(() => buildScene(gltf), 20));
+  if (ls) ls.textContent = 'Loading CFD flow field…';
+  flowPromise.then(field => {
+    cfd = field;
+    if (ls) ls.textContent = 'Building aero…';
+    setLoadProgress(1);
+    applyFlowReadout();
+    // Give the "Building aero…" state a moment to paint before the heavy synchronous
+    // build (a timer rather than rAF, so background tabs still finish loading).
+    setTimeout(() => buildScene(gltf), 50);
+  });
 }, xhr => {
-  if (xhr.total) setLoadProgress((xhr.loaded / xhr.total) * 0.95);
+  if (xhr.total) { loadFrac.car = xhr.loaded / xhr.total; bumpLoad(); }
 }, err => {
   console.error(err);
   const ls = document.getElementById('load-status');

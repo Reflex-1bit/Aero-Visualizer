@@ -2,8 +2,9 @@
 
 An interactive 3D aerodynamics visualizer for a Formula 1 car (RB19 model). It renders
 the car as a translucent neon shell and traces wind streamlines over, around, and under
-the body using a lightweight potential-flow model (freestream + horseshoe-vortex +
-source-panel solve for the rear wing, with voxel-based body deflection for the rest).
+the body through a **real CFD flow field**. The field is computed offline by a custom
+CUDA lattice Boltzmann wind-tunnel solver (LES turbulence model, rolling road, 50M cells)
+and shipped with the site. See [`cuda/README.md`](cuda/README.md).
 
 **Live demo:** https://aero-visual.vercel.app
 
@@ -15,7 +16,11 @@ source-panel solve for the rear wing, with voxel-based body deflection for the r
 
 ## Features
 
-- Real-time streamlines that hug the bodywork and glide along the ground.
+- Streamlines traced through a time-averaged CFD solution from a hand-written CUDA
+  D3Q19 lattice Boltzmann solver, coloured by simulated speed or pressure, with the
+  simulation's own drag and lift coefficients shown on screen.
+- Falls back to the original analytic model (ML section Cl + horseshoe vortex +
+  source panels) if the flow file is unavailable.
 - Structural part menu — isolate the front wing, nose, sidepods, floor, or rear wing
   and see each part's solid shell plus its own wind interaction.
 - Rear wing driven by an ML-trained section-Cl model feeding a horseshoe/panel solve;
@@ -74,6 +79,8 @@ python -m http.server 8765
 | --- | --- |
 | `index.html` | The entire app (Three.js scene, physics, UI). |
 | `rb19.glb` | The 3D car model loaded at runtime (Draco-compressed, ~2.5 MB). |
+| `flow/rb19.flow` | Packed CFD flow field (velocity + Cp) loaded by the page. |
+| `cuda/` | CUDA lattice Boltzmann solver and the geometry → grid → flow pipeline. |
 | `ml/` | Airfoil Cl/Cd machine-learning notebook. |
 | `scripts/` | Model export / aero-assembly pipeline and iterative build patches (`export_rb19.py`, `assemble_aero.py`, `fix_*.py`, `patch_*.py`). |
 | `data/` | Model source & metadata (`rb19.zip`, `_model_extract.json`, `model.txt`). |
@@ -89,6 +96,10 @@ python -m http.server 8765
 ## Deploy
 
 ```bash
-# static deploy of the site + model
+# static deploy of the site + model + CFD flow field
+mkdir -p dist/flow && cp index.html rb19.glb dist/ && cp flow/rb19.flow dist/flow/
 vercel deploy ./dist --prod
 ```
+
+`flow/rb19.flow` must ship alongside the page. Without it the site falls back to the
+analytic flow model.
