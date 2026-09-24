@@ -223,7 +223,7 @@ renderer.domElement.addEventListener('mousedown', e => { isDragging = true; last
 window.addEventListener('mouseup', () => { isDragging = false; });
 window.addEventListener('mousemove', e => {
   if (!isDragging) return;
-  camTheta -= (e.clientX - lastX) * 0.005;
+  camTheta += (e.clientX - lastX) * 0.005;
   camPhi = Math.max(0.15, Math.min(Math.PI - 0.15, camPhi - (e.clientY - lastY) * 0.005));
   lastX = e.clientX; lastY = e.clientY; updateCamera();
 });
@@ -250,7 +250,7 @@ renderer.domElement.addEventListener('touchstart', e => {
 renderer.domElement.addEventListener('touchmove', e => {
   if (touchMode === 1 && e.touches.length === 1) {
     const t = e.touches[0];
-    camTheta -= (t.clientX - lastX) * 0.006;
+    camTheta += (t.clientX - lastX) * 0.006;
     camPhi = Math.max(0.15, Math.min(Math.PI - 0.15, camPhi - (t.clientY - lastY) * 0.006));
     lastX = t.clientX; lastY = t.clientY; updateCamera();
   } else if (touchMode === 2 && e.touches.length >= 2) {
