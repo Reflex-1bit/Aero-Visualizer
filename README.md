@@ -10,9 +10,20 @@ and shipped with the site. See [`cuda/README.md`](cuda/README.md).
 
 ## Screenshots
 
-| 3/4 view — streamlines over the body | Rear view — underbody & wake flow |
+Streamlines traced through the CUDA CFD solution, coloured by simulated air speed
+(blue = slow, yellow/red = fast) or pressure.
+
+| 3/4 view — flow over the body (speed) | Rear 3/4 — slow wake behind the car (speed) |
 | --- | --- |
-| ![3/4 flow view](screenshots/flow-3q.png) | ![rear flow view](screenshots/flow-rear.png) |
+| ![3/4 view coloured by speed](screenshots/cfd-3q-speed.png) | ![rear view showing the wake](screenshots/cfd-rear-wake.png) |
+| **Side view — flow over and under the car (speed)** | **Top view — flow around the car (pressure)** |
+| ![side view coloured by speed](screenshots/cfd-side-speed.png) | ![top view coloured by pressure](screenshots/cfd-top-pressure.png) |
+
+**Raw CFD output** (1.25 cm grid, half car). From top to bottom: speed on the
+centreline, pressure coefficient on the centreline (nose stagnation in red), speed 5 cm
+above the road (fast air under the floor, wheel wakes), and speed 50 cm up:
+
+![CFD cross-sections](screenshots/cfd-slices.png)
 
 ## Features
 

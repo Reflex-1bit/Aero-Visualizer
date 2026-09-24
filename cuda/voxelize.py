@@ -129,7 +129,11 @@ def main():
     # Closing alone would also seal the thin gap under the floor (and between
     # nearby parts), killing ground effect. Only keep closed cells that are
     # enclosed by skin along every axis, i.e. genuinely inside the body.
-    solid = (closed & between(surface, 0) & between(surface, 1) & between(surface, 2)) | surface
+    if args.half:  # the skin's mirror image across z = 0 bounds the body too
+        bz = between(np.concatenate([surface[::-1], surface]), 0)[surface.shape[0]:]
+    else:
+        bz = between(surface, 0)
+    solid = (closed & bz & between(surface, 1) & between(surface, 2)) | surface
     solid[:, 0, :] = 0  # the ground row is handled by the solver's moving wall
     assert not solid[:, -1, :].any() and not solid[-1].any(), "car touches the tunnel walls"
     assert args.half or not solid[0].any(), "car touches the tunnel walls"
